@@ -170,12 +170,7 @@ NextHtmlRow:
     '------------------------------------------------------------------
     ' Ensure folder & write file
     '------------------------------------------------------------------
-    MakeParentFolder htmlPath
-    Dim ff As Integer
-    ff = FreeFile
-    Open htmlPath For Output As #ff
-    Print #ff, sb
-    Close #ff
+    WriteUTF8 htmlPath, sb
 End Sub
 
 '============================== Cell style ====================================
@@ -238,7 +233,11 @@ Private Function CellInnerHtml(ByVal c As Range) As String
     
     ' Detect if all formatting is uniform; if so we can just dump escaped text
     If FontIsUniform(c) Then
-        CellInnerHtml = EscapeHtml(Replace(txt, vbLf, "<br>"))
+        ' CellInnerHtml = EscapeHtml(Replace(txt, vbLf, "<br>"))
+        Dim esc As String
+        esc = EscapeHtml(txt)
+        CellInnerHtml = Replace(esc, vbLf, "<br>")
+
         Exit Function
     End If
     
@@ -289,8 +288,11 @@ Private Function BuildSpan(ByVal seg As String, ByVal col As Long, _
     If isBold Then css = css & "font-weight:bold;"
     If isItalic Then css = css & "font-style:italic;"
     If isUL Then css = css & "text-decoration:underline;"
+    Dim escSeg As String
+    escSeg = EscapeHtml(seg)
     BuildSpan = "<span style=""" & css & """>" & _
-                EscapeHtml(Replace(seg, vbLf, "<br>")) & "</span>"
+                Replace(escSeg, vbLf, "<br>") & "</span>"
+
 End Function
 
 '============================ Helpers ========================================
@@ -355,6 +357,23 @@ Private Function EscapeHtml(ByVal s As String) As String
     s = Replace$(s, """", "&quot;")
     EscapeHtml = s
 End Function
+
+'------------------------------------------------------------
+' WriteUTF8 – saves content to disk encoded as UTF-8 (BOM-less)
+'------------------------------------------------------------
+Private Sub WriteUTF8(ByVal fPath As String, ByVal txt As String)
+    Dim stm As Object                      ' ADODB.Stream
+    Set stm = CreateObject("ADODB.Stream")
+    With stm
+        .Type = 2                          ' text
+        .Charset = "UTF-8"
+        .Open
+        .WriteText txt
+        .SaveToFile fPath, 2               ' adSaveCreateOverWrite
+        .Close
+    End With
+End Sub
+
 
 ' Escape font name for CSS (wrap in quotes if space)
 Private Function EscapeCssFont(ByVal s As String) As String
