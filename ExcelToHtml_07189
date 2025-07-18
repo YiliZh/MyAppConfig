@@ -1,0 +1,378 @@
+Option Explicit
+'==============================================================================
+' ExportActiveSheetToHtmlExact
+'   Wrapper: exports the *ActiveSheet* to HTML replicating layout & formatting.
+'==============================================================================
+Sub ExportActiveSheetToHtmlExact()
+    Const HTML_PATH As String = "C:\Temp\ExcelSheetExport.html"   ' <-- change
+    ExportSheetToHtmlExact ActiveSheet, HTML_PATH
+    MsgBox "HTML export complete:" & vbCrLf & HTML_PATH, vbInformation
+End Sub
+
+'==============================================================================
+' ExportSheetToHtmlExact
+'   Core routine: generate HTML that mirrors the sheet's UsedRange.
+'
+'   Features:
+'     • Rowspan / Colspan for merged cells
+'     • Column widths & row heights (approx px)
+'     • Background color, font family, size, bold, italic, underline
+'     • Horizontal & vertical alignment
+'     • Text wrapping
+'     • Inline rich-text colour / bold / italic runs per character sequence
+'     • Multi-line cells (Alt+Enter) -> <br>
+'
+'   Notes:
+'     - Column & row px conversion is approximate; Excel points?px @ 96 dpi.
+'     - Hidden rows/columns are skipped (change SKIP_HIDDEN_* constants if not).
+'     - Theme colors resolve to RGB via .Color (already returns RGB long in most
+'       cases; if .Color = 0 but ColorIndex >=0 we'll fallback to that).
+'==============================================================================
+Public Sub ExportSheetToHtmlExact(ByVal src As Worksheet, ByVal htmlPath As String)
+    Const SKIP_HIDDEN_ROWS As Boolean = True
+    Const SKIP_HIDDEN_COLS As Boolean = True
+    
+    Dim u As Range
+    On Error Resume Next
+    Set u = src.UsedRange
+    On Error GoTo 0
+    If u Is Nothing Then
+        Err.Raise vbObjectError + 10, , "Sheet has no UsedRange."
+    End If
+    
+    Dim rFirst As Long, cFirst As Long, rCnt As Long, cCnt As Long
+    rFirst = u.Row
+    cFirst = u.Column
+    rCnt = u.Rows.Count
+    cCnt = u.Columns.Count
+    
+    ' Precache row heights / hidden flags
+    Dim rowHeights() As Double, rowHidden() As Boolean
+    ReDim rowHeights(1 To rCnt)
+    ReDim rowHidden(1 To rCnt)
+    Dim rIx As Long, cIx As Long
+    
+    For rIx = 1 To rCnt
+        rowHeights(rIx) = src.Rows(rFirst + rIx - 1).Height  ' points
+        rowHidden(rIx) = src.Rows(rFirst + rIx - 1).Hidden
+    Next rIx
+    
+    ' Precache column widths / hidden flags
+    Dim colWidths() As Double, colHidden() As Boolean
+    ReDim colWidths(1 To cCnt)
+    ReDim colHidden(1 To cCnt)
+    For cIx = 1 To cCnt
+        colWidths(cIx) = src.Columns(cFirst + cIx - 1).Width  ' points? Actually ColumnWidth; get .Width instead
+    Next cIx
+    ' Replace ColumnWidth w/ actual width in points (safer) via .Columns(...).Width property
+    For cIx = 1 To cCnt
+        colWidths(cIx) = src.Columns(cFirst + cIx - 1).Width    ' points value
+        colHidden(cIx) = src.Columns(cFirst + cIx - 1).Hidden
+    Next cIx
+    
+    ' We'll need actual "points" width; ensure we cast; some versions return Variant
+    ' Safe approximate conversion to css px:
+    '   cssPx = points * (96 / 72)  ' 1pt = 1/72", CSS default 96dpi
+    Const PT_TO_PX As Double = 96# / 72#
+    
+    ' Track which cells already emitted (merged areas)
+    Dim emitted() As Boolean
+    ReDim emitted(1 To rCnt, 1 To cCnt)
+    
+    '------------------------------------------------------------------
+    ' Build HTML
+    '------------------------------------------------------------------
+    Dim sb As String
+    sb = "<!DOCTYPE html>" & vbCrLf & _
+         "<html lang='en'>" & vbCrLf & "<head>" & vbCrLf & _
+         "<meta charset='UTF-8'>" & vbCrLf & _
+         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" & vbCrLf & _
+         "<title>" & EscapeHtml(src.Name) & "</title>" & vbCrLf & _
+         "<style>" & vbCrLf & _
+         "table.excel-export{border-collapse:collapse;border:1px solid #666;}" & vbCrLf & _
+         "table.excel-export td,table.excel-export th{border:1px solid #666;padding:0;margin:0;}" & vbCrLf & _
+         "</style>" & vbCrLf & "</head>" & vbCrLf & "<body>" & vbCrLf & _
+         "<h1>" & EscapeHtml(src.Name) & "</h1>" & vbCrLf & _
+         "<table class='excel-export'>" & vbCrLf
+    
+    ' Column widths via colgroup (skip hidden if required)
+    sb = sb & "<colgroup>" & vbCrLf
+    For cIx = 1 To cCnt
+        If SKIP_HIDDEN_COLS And colHidden(cIx) Then
+            ' skip entirely
+        Else
+            sb = sb & "<col style='width:" & Format$(colWidths(cIx) * PT_TO_PX, "0") & "px'>" & vbCrLf
+        End If
+    Next cIx
+    sb = sb & "</colgroup>" & vbCrLf
+    
+    ' Rows
+    Dim excelRow As Long, excelCol As Long
+    For rIx = 1 To rCnt
+        If SKIP_HIDDEN_ROWS And rowHidden(rIx) Then GoTo NextHtmlRow
+        
+        sb = sb & "<tr style='height:" & Format$(rowHeights(rIx) * PT_TO_PX, "0") & "px'>" & vbCrLf
+        
+        For cIx = 1 To cCnt
+            If SKIP_HIDDEN_COLS And colHidden(cIx) Then GoTo NextHtmlCell
+            
+            If emitted(rIx, cIx) Then GoTo NextHtmlCell
+            
+            excelRow = rFirst + rIx - 1
+            excelCol = cFirst + cIx - 1
+            
+            Dim cRng As Range
+            Set cRng = src.Cells(excelRow, excelCol)
+            
+            Dim mArea As Range
+            If cRng.MergeCells Then
+                Set mArea = cRng.MergeArea
+            Else
+                Set mArea = cRng
+            End If
+            
+            ' Determine spans in UsedRange coordinates
+            Dim rowSpan As Long, colSpan As Long
+            rowSpan = mArea.Rows.Count
+            colSpan = mArea.Columns.Count
+            
+            ' Mark all cells in the merge area as emitted
+            Dim mr As Long, mc As Long
+            For mr = 1 To rowSpan
+                For mc = 1 To colSpan
+                    If (rIx + mr - 1) >= 1 And (rIx + mr - 1) <= rCnt _
+                    And (cIx + mc - 1) >= 1 And (cIx + mc - 1) <= cCnt Then
+                        emitted(rIx + mr - 1, cIx + mc - 1) = True
+                    End If
+                Next mc
+            Next mr
+            
+            ' Compose <td ...> with spans
+            sb = sb & "<td"
+            If rowSpan > 1 Then sb = sb & " rowspan='" & rowSpan & "'"
+            If colSpan > 1 Then sb = sb & " colspan='" & colSpan & "'"
+            
+            ' Cell-level style
+            sb = sb & " style='" & CellStyleCss(cRng) & "'>"
+            
+            ' Cell inner HTML (rich text)
+            sb = sb & CellInnerHtml(cRng) & "</td>" & vbCrLf
+            
+NextHtmlCell:
+        Next cIx
+        
+        sb = sb & "</tr>" & vbCrLf
+NextHtmlRow:
+    Next rIx
+    
+    sb = sb & "</table>" & vbCrLf & "</body></html>"
+    
+    '------------------------------------------------------------------
+    ' Ensure folder & write file
+    '------------------------------------------------------------------
+    MakeParentFolder htmlPath
+    Dim ff As Integer
+    ff = FreeFile
+    Open htmlPath For Output As #ff
+    Print #ff, sb
+    Close #ff
+End Sub
+
+'============================== Cell style ====================================
+' Return inline CSS for a cell
+Private Function CellStyleCss(ByVal c As Range) As String
+    Dim css As String
+    
+    ' Background
+    css = css & "background:" & HtmlColorString(ColorVariantToLong(c.Interior.Color)) & ";"
+    
+    ' Alignment
+    Select Case c.HorizontalAlignment
+        Case xlLeft, xlHAlignLeft: css = css & "text-align:left;"
+        Case xlRight, xlHAlignRight: css = css & "text-align:right;"
+        Case xlCenter, xlHAlignCenter: css = css & "text-align:center;"
+        Case xlJustify: css = css & "text-align:justify;"
+    End Select
+    
+    Select Case c.VerticalAlignment
+        Case xlTop: css = css & "vertical-align:top;"
+        Case xlBottom, xlVAlignBottom: css = css & "vertical-align:bottom;"
+        Case xlCenter, xlVAlignCenter: css = css & "vertical-align:middle;"
+        Case xlJustify: css = css & "vertical-align:baseline;" 'approx
+        Case xlVAlignDistributed: css = css & "vertical-align:middle;"
+    End Select
+    
+    ' Text wrap
+    If c.WrapText Then
+        css = css & "white-space:normal;"
+    Else
+        css = css & "white-space:nowrap;"
+    End If
+    
+    ' Whole-cell font (fallback when no per-char variation)
+    With c.Font
+        css = css & "font-family:" & EscapeCssFont(.Name) & ";"
+        css = css & "font-size:" & .Size & "pt;"
+        If .Bold Then css = css & "font-weight:bold;" Else css = css & "font-weight:normal;"
+        If .Italic Then css = css & "font-style:italic;" Else css = css & "font-style:normal;"
+        If .Underline <> xlUnderlineStyleNone Then css = css & "text-decoration:underline;"
+        ' color handled in inner HTML (rich text); but if uniform we include:
+        If FontIsUniform(c) Then css = css & "color:" & HtmlColorString(ColorVariantToLong(.Color)) & ";"
+    End With
+    
+    CellStyleCss = css
+End Function
+
+'========================== Cell Inner HTML ===================================
+' Build HTML for the cell's text, preserving inline colour / bold / italic runs.
+Private Function CellInnerHtml(ByVal c As Range) As String
+    Dim txt As String
+    txt = CStr(c.Text)
+    If Len(txt) = 0 Then
+        CellInnerHtml = "&nbsp;"   ' empty cell
+        Exit Function
+    End If
+    
+    Dim i As Long, n As Long
+    n = Len(txt)
+    
+    ' Detect if all formatting is uniform; if so we can just dump escaped text
+    If FontIsUniform(c) Then
+        CellInnerHtml = EscapeHtml(Replace(txt, vbLf, "<br>"))
+        Exit Function
+    End If
+    
+    ' Otherwise build character runs
+    Dim runStart As Long: runStart = 1
+    Dim curCol As Long, curBold As Boolean, curItalic As Boolean, curUL As Boolean
+    
+    With c.Characters(1, 1).Font
+        curCol = ColorVariantToLong(.Color)
+        curBold = .Bold
+        curItalic = .Italic
+        curUL = (.Underline <> xlUnderlineStyleNone)
+    End With
+    
+    Dim sb As String
+    For i = 2 To n + 1  ' sentinel flush
+        Dim thisCol As Long, thisBold As Boolean, thisItalic As Boolean, thisUL As Boolean
+        If i <= n Then
+            With c.Characters(i, 1).Font
+                thisCol = ColorVariantToLong(.Color)
+                thisBold = .Bold
+                thisItalic = .Italic
+                thisUL = (.Underline <> xlUnderlineStyleNone)
+            End With
+        Else
+            thisCol = -1
+            thisBold = Not curBold      'force flush
+            thisItalic = curItalic
+            thisUL = curUL
+        End If
+        
+        If thisCol <> curCol Or thisBold <> curBold Or thisItalic <> curItalic Or thisUL <> curUL Then
+            sb = sb & BuildSpan(Mid$(txt, runStart, i - runStart), curCol, curBold, curItalic, curUL)
+            runStart = i
+            curCol = thisCol: curBold = thisBold: curItalic = thisItalic: curUL = thisUL
+        End If
+    Next i
+    
+    CellInnerHtml = sb
+End Function
+
+' Build a styled <span> for a text segment
+Private Function BuildSpan(ByVal seg As String, ByVal col As Long, _
+                           ByVal isBold As Boolean, ByVal isItalic As Boolean, _
+                           ByVal isUL As Boolean) As String
+    Dim css As String
+    css = "color:" & HtmlColorString(col) & ";"
+    If isBold Then css = css & "font-weight:bold;"
+    If isItalic Then css = css & "font-style:italic;"
+    If isUL Then css = css & "text-decoration:underline;"
+    BuildSpan = "<span style=""" & css & """>" & _
+                EscapeHtml(Replace(seg, vbLf, "<br>")) & "</span>"
+End Function
+
+'============================ Helpers ========================================
+
+' Determine whether the entire cell uses a uniform font color/bold/italic/underline
+Private Function FontIsUniform(ByVal c As Range) As Boolean
+    Dim txt As String: txt = CStr(c.Text)
+    Dim n As Long: n = Len(txt)
+    If n <= 1 Then FontIsUniform = True: Exit Function
+    
+    Dim baseCol As Long, baseBold As Boolean, baseItalic As Boolean, baseUL As Boolean
+    With c.Characters(1, 1).Font
+        baseCol = ColorVariantToLong(.Color)
+        baseBold = .Bold
+        baseItalic = .Italic
+        baseUL = (.Underline <> xlUnderlineStyleNone)
+    End With
+    
+    Dim i As Long
+    For i = 2 To n
+        With c.Characters(i, 1).Font
+            If ColorVariantToLong(.Color) <> baseCol _
+            Or .Bold <> baseBold _
+            Or .Italic <> baseItalic _
+            Or (.Underline <> xlUnderlineStyleNone) <> baseUL Then
+                FontIsUniform = False
+                Exit Function
+            End If
+        End With
+    Next i
+    FontIsUniform = True
+End Function
+
+' Convert variant color to Long safely; returns white if Null/None
+Private Function ColorVariantToLong(ByVal vCol As Variant) As Long
+    If IsNull(vCol) Then
+        ColorVariantToLong = vbWhite
+    ElseIf vCol = xlNone Or vCol = -4142 Then
+        ColorVariantToLong = vbWhite
+    Else
+        ColorVariantToLong = CLng(vCol)
+    End If
+End Function
+
+' Return css rgb(...) string from a VBA color Long
+Private Function HtmlColorString(ByVal col As Long) As String
+    Dim r As Long, g As Long, b As Long
+    b = (col \ 65536) And &HFF    ' Excel Long is BGR or RGB? Actually BGR in &HBBGGRR; but easier using simple math:
+    ' Actually correct breakdown: red = col Mod 256; green = (col \ 256) Mod 256; blue = (col \ 65536) Mod 256
+    r = (col And &HFF&)
+    g = (col \ 256) And &HFF&
+    b = (col \ 65536) And &HFF&
+    HtmlColorString = "rgb(" & r & "," & g & "," & b & ")"
+End Function
+
+' Escape HTML entities
+Private Function EscapeHtml(ByVal s As String) As String
+    If Len(s) = 0 Then Exit Function
+    s = Replace$(s, "&", "&amp;")
+    s = Replace$(s, "<", "&lt;")
+    s = Replace$(s, ">", "&gt;")
+    s = Replace$(s, """", "&quot;")
+    EscapeHtml = s
+End Function
+
+' Escape font name for CSS (wrap in quotes if space)
+Private Function EscapeCssFont(ByVal s As String) As String
+    If InStr(s, " ") > 0 Then
+        EscapeCssFont = """" & Replace$(s, """", "'") & """"
+    Else
+        EscapeCssFont = s
+    End If
+End Function
+
+' Ensure parent folder exists
+Private Sub MakeParentFolder(ByVal fPath As String)
+    Dim fso As Object, parentDir As String
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    parentDir = fso.GetParentFolderName(fPath)
+    If Len(parentDir) > 0 Then
+        If Not fso.FolderExists(parentDir) Then fso.CreateFolder parentDir
+    End If
+End Sub
+
+
