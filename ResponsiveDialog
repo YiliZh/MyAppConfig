@@ -1,52 +1,81 @@
+// ResponsiveDialog.tsx
 import * as React from 'react';
-import { Dialog, DialogType, DialogFooter, PrimaryButton, DefaultButton, IDialogContentStyles, IModalStyles } from '@fluentui/react';
+import { PrimaryButton, DefaultButton } from '@fluentui/react/lib/Button';
+import { Dialog, DialogType, DialogFooter } from '@fluentui/react/lib/Dialog';
+import { mergeStyleSets } from '@fluentui/react/lib/Styling';
 
-const DIALOG_DESIGN_WIDTH = 1690; // your fixed content width
+const classes = mergeStyleSets({
+  // Wrapper applied to the dialog surface (the white card)
+  dialogSurface: {
+    // Don't let it exceed viewport; this is the key to behaving well on zoom
+    width: 'min(900px, 90vw)',
+    maxWidth: '90vw',
+    maxHeight: '85vh',
 
-// Use Partial<IModalStyles> to override only what we need
-const modalStyles: Partial<IModalStyles> = {
-  main: {
-    // Remove the default 576px maxWidth
-    maxWidth: `min(90vw, ${DIALOG_DESIGN_WIDTH}px)`,
-    width: `min(90vw, ${DIALOG_DESIGN_WIDTH}px)`,
+    // Make body scroll if content is long
+    display: 'flex',
+    flexDirection: 'column',
   },
-};
-
-const dialogContentStyles: Partial<IDialogContentStyles> = {
-  content: {
-    maxHeight: '90vh',       // No taller than 90% viewport height
-    overflowY: 'auto',       // vertical scroll if needed
-    overflowX: 'auto',       // horizontal scroll if needed
-    padding: 0,
+  // The content area inside—let it scroll if needed
+  dialogInner: {
+    overflow: 'auto',
+    // leave space for title/actions
+    padding: '0 24px 8px',
   },
-};
+
+  // Optional: tighter on very small screens
+  '@media (max-width: 480px)': {
+    dialogSurface: {
+      width: '95vw',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      borderRadius: 8,
+    },
+  },
+});
 
 export const ResponsiveDialog: React.FC = () => {
-  const [open, setOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(false);
 
   return (
     <>
-      <PrimaryButton text="Open dialog" onClick={() => setOpen(true)} />
+      <PrimaryButton text="Open popup" onClick={() => setIsOpen(true)} />
+
       <Dialog
-        hidden={!open}
-        onDismiss={() => setOpen(false)}
+        hidden={!isOpen}
+        onDismiss={() => setIsOpen(false)}
         dialogContentProps={{
-          type: DialogType.largeHeader,
-          title: 'Responsive Wide Dialog',
-          styles: dialogContentStyles,
+          type: DialogType.normal,
+          title: 'Responsive popup',
+          showCloseButton: true,
+          // We won’t put content here; we’ll render below so we can style/scroll
         }}
         modalProps={{
-          isBlocking: true,
-          styles: modalStyles, // overrides default 576px clamp
+          isBlocking: false,
+          // Apply our responsive sizes to the dialog surface
+          styles: {
+            main: classes.dialogSurface,
+          },
         }}
       >
-        {/* Keep content's natural width to show horizontal scroll on small screens */}
-        <div style={{ width: DIALOG_DESIGN_WIDTH }}>
-          {/* Your 1690px-wide content */}
+        {/* Scrollable body */}
+        <div className={classes.dialogInner}>
+          <p>
+            This dialog will keep to 90% of the viewport width/height, so even when you zoom,
+            it won’t cover the whole screen. If content gets long, this area scrolls.
+          </p>
+          <p>
+            Add your content here… tables, forms, anything. Try zooming the browser in/out
+            and resizing the window to see it adapt.
+          </p>
+
+          {/* Demo filler for scrolling */}
+          <div style={{ height: 600 }} />
         </div>
+
         <DialogFooter>
-          <DefaultButton onClick={() => setOpen(false)} text="Close" />
-          <PrimaryButton onClick={() => alert('Save')} text="Save" />
+          <DefaultButton text="Close" onClick={() => setIsOpen(false)} />
+          <PrimaryButton text="Do action" onClick={() => alert('Action')} />
         </DialogFooter>
       </Dialog>
     </>
