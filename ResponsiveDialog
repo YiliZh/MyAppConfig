@@ -1,0 +1,64 @@
+import * as React from 'react';
+import { Dialog, DialogType, DialogFooter, PrimaryButton, DefaultButton, IDialogContentStyles, IModalStyles } from '@fluentui/react';
+
+const DIALOG_DESIGN_WIDTH = 1690; // your content’s natural width
+
+const modalStyles: IModalStyles = {
+  // Styles applied to the underlying Modal that wraps Dialog
+  main: {
+    // Width never exceeds 90% of the viewport, but can grow up to 1690px on large screens
+    width: `min(90vw, ${DIALOG_DESIGN_WIDTH}px)`,
+    maxWidth: `min(90vw, ${DIALOG_DESIGN_WIDTH}px)`,
+  },
+};
+
+const dialogContentStyles: Partial<IDialogContentStyles> = {
+  // The scroll container inside the dialog
+  content: {
+    maxHeight: '90vh',       // at most 90% of viewport height
+    overflowY: 'auto',       // vertical scroll if needed
+    overflowX: 'auto',       // horizontal scroll for narrow screens
+    padding: 0,              // optional: remove extra padding so 1690px fits edge-to-edge
+  },
+  inner: {
+    padding: 16,             // optional content padding
+  },
+};
+
+export const ResponsiveDialogExample: React.FC = () => {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <>
+      <PrimaryButton text="Open dialog" onClick={() => setOpen(true)} />
+
+      <Dialog
+        hidden={!open}
+        onDismiss={() => setOpen(false)}
+        dialogContentProps={{
+          type: DialogType.largeHeader,
+          title: 'Responsive Dialog',
+          styles: dialogContentStyles,
+        }}
+        modalProps={{
+          isBlocking: true,
+          styles: modalStyles,
+        }}
+      >
+        {/* 
+          Keep your content at its natural 1690px width so small screens get a horizontal scrollbar.
+          On large screens (>= 1690px/0.9 ≈ 1878px viewport width), the dialog will render it full-size without scrollbars.
+        */}
+        <div style={{ width: DIALOG_DESIGN_WIDTH }}>
+          {/* Your 1690px-wide layout goes here */}
+          {/* Big table, wide form, etc. */}
+        </div>
+
+        <DialogFooter>
+          <DefaultButton onClick={() => setOpen(false)} text="Close" />
+          <PrimaryButton onClick={() => alert('Do something')} text="Save" />
+        </DialogFooter>
+      </Dialog>
+    </>
+  );
+};
