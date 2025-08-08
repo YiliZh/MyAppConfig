@@ -1,81 +1,35 @@
-// ResponsiveDialog.tsx
 import * as React from 'react';
-import { PrimaryButton, DefaultButton } from '@fluentui/react/lib/Button';
 import { Dialog, DialogType, DialogFooter } from '@fluentui/react/lib/Dialog';
-import { mergeStyleSets } from '@fluentui/react/lib/Styling';
+import { PrimaryButton, DefaultButton } from '@fluentui/react/lib/Button';
+import styles from './DialogWide.module.scss';
 
-const classes = mergeStyleSets({
-  // Wrapper applied to the dialog surface (the white card)
-  dialogSurface: {
-    // Don't let it exceed viewport; this is the key to behaving well on zoom
-    width: 'min(900px, 90vw)',
-    maxWidth: '90vw',
-    maxHeight: '85vh',
-
-    // Make body scroll if content is long
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  // The content area inside—let it scroll if needed
-  dialogInner: {
-    overflow: 'auto',
-    // leave space for title/actions
-    padding: '0 24px 8px',
-  },
-
-  // Optional: tighter on very small screens
-  '@media (max-width: 480px)': {
-    dialogSurface: {
-      width: '95vw',
-      maxWidth: '95vw',
-      maxHeight: '90vh',
-      borderRadius: 8,
-    },
-  },
-});
-
-export const ResponsiveDialog: React.FC = () => {
-  const [isOpen, setIsOpen] = React.useState(false);
+export const PureWideDialog: React.FC = () => {
+  const [open, setOpen] = React.useState(false);
 
   return (
     <>
-      <PrimaryButton text="Open popup" onClick={() => setIsOpen(true)} />
-
+      <PrimaryButton text="Open popup" onClick={() => setOpen(true)} />
       <Dialog
-        hidden={!isOpen}
-        onDismiss={() => setIsOpen(false)}
+        hidden={!open}
+        onDismiss={() => setOpen(false)}
+        className={styles.dialogScope}               {/* <-- this makes the overrides apply */}
         dialogContentProps={{
           type: DialogType.normal,
           title: 'Responsive popup',
           showCloseButton: true,
-          // We won’t put content here; we’ll render below so we can style/scroll
         }}
         modalProps={{
           isBlocking: false,
-          // Apply our responsive sizes to the dialog surface
-          styles: {
-            main: classes.dialogSurface,
-          },
+          // don't set width here; the CSS above (with !important) wins reliably
         }}
       >
-        {/* Scrollable body */}
-        <div className={classes.dialogInner}>
-          <p>
-            This dialog will keep to 90% of the viewport width/height, so even when you zoom,
-            it won’t cover the whole screen. If content gets long, this area scrolls.
-          </p>
-          <p>
-            Add your content here… tables, forms, anything. Try zooming the browser in/out
-            and resizing the window to see it adapt.
-          </p>
-
-          {/* Demo filler for scrolling */}
+        <div style={{ padding: '0 24px 8px', flex: '1 1 auto' }}>
+          Try zooming or resizing — the dialog tracks the viewport, not 600px.
           <div style={{ height: 600 }} />
         </div>
-
         <DialogFooter>
-          <DefaultButton text="Close" onClick={() => setIsOpen(false)} />
-          <PrimaryButton text="Do action" onClick={() => alert('Action')} />
+          <DefaultButton onClick={() => setOpen(false)} text="Close" />
+          <PrimaryButton onClick={() => alert('ok')} text="Action" />
         </DialogFooter>
       </Dialog>
     </>
